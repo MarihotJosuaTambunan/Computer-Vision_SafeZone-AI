@@ -1,4 +1,5 @@
 import streamlit as st
+import os
 import requests
 import cv2
 import numpy as np
@@ -14,7 +15,7 @@ st.set_page_config(
 )
 
 # Alamat URL API Backend FastAPI kita
-BACKEND_URL = "http://localhost:8000"
+BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 
 # 2. Desain Header & Title Dashboard
 st.title("🛡️ SafeZone-AI: Real-Time K3 APD Monitoring System")
