@@ -1,18 +1,13 @@
 import io
-
 import cv2
-
 import numpy as np
-
+import os
 from fastapi import FastAPI, File, UploadFile, HTTPException
-
 from fastapi.responses import StreamingResponse
-
 from fastapi.middleware.cors import CORSMiddleware
-
 from engine.inference import YOLOInferenceEngine
-
 from engine.rule_engine import K3RuleEngine
+from live_camera import generate_camera_stream
 
 
 
@@ -25,30 +20,39 @@ app = FastAPI(
     description="API Server Terintegrasi ByteTrack & Real-Time Video Streaming Engine",
 
     version="1.2.0"
-
 )
-
-
 
 app.add_middleware(
-
     CORSMiddleware,
-
     allow_origins=["*"],
-
     allow_credentials=True,
-
     allow_methods=["*"],
-
     allow_headers=["*"],
-
 )
 
+
+@app.get("/api/v1/stream/live")
+async def live_feed(source: str = "0", track: bool = True):
+    """
+    Endpoint streaming langsung dari kamera.
+    - `source`: '0' (default) untuk webcam lokal, atau URL RTSP/HTTP.
+    - `track`: jika True gunakan tracking (ByteTrack) untuk menjaga `worker_id`.
+    """
+    src = source
+    use_tracking = bool(track)
+
+    return StreamingResponse(
+        generate_camera_stream(inference_engine, rule_engine, source=src, use_tracking=use_tracking),
+        media_type="multipart/x-mixed-replace; boundary=frame"
+    )
+
+
+# ==============================================================
 
 
 # Inisialisasi Core Engine
 
-MODEL_PATH = "../weights/best_yolov8.onnx"
+MODEL_PATH = "../weights/best_yolov10.onnx"
 
 try:
 
@@ -60,9 +64,9 @@ try:
 
 except Exception as e:
 
-    print(f"WARNING: Gagal memuat model, menggunakan fallback (yolov8s.pt)...")
+    print(f"WARNING: Gagal memuat model, menggunakan fallback (yolov10s.pt)...")
 
-    inference_engine = YOLOInferenceEngine(model_path="yolov8s.pt")
+    inference_engine = YOLOInferenceEngine(model_path="yolov10s.pt")
 
     rule_engine = K3RuleEngine()
 
@@ -154,15 +158,17 @@ def generate_video_stream(video_path: str):
 
             
 
-            # Buat teks label status monitoring K3
+            # Buat teks label status monitoring K3 dengan confidence score
 
-            label = f"ID:{w_id} | H:{analysis['helmet']} | V:{analysis['vest']}"
+            conf = worker.get('confidence', 0.0)
+
+            label = f"ID:{w_id} | H:{analysis['helmet']} | V:{analysis['vest']} | Conf:{conf:.2f}"
 
             
 
             # Gambar latar belakang teks label agar terbaca jelas
 
-            cv2.rectangle(frame, (x1, y1 - 35), (x1 + 380, y1), color, -1)
+            cv2.rectangle(frame, (x1, y1 - 35), (x1 + 415, y1), color, -1)
 
             cv2.putText(frame, label, (x1 + 5, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
 
@@ -208,7 +214,7 @@ async def video_feed():
 
     # Pastikan kamu menaruh file video uji coba bernama 'video_test.mp4' di folder data/
 
-    video_source = "/workspace/TA/data/video_test.mp4"
+    video_source = "../data/video_test.mp4"
 
     
 
@@ -224,6 +230,27 @@ async def video_feed():
 
         media_type="multipart/x-mixed-replace; boundary=frame"
 
+    )
+
+
+@app.get("/api/v1/stream/video-custom")
+async def custom_video_feed(path: str):
+    """
+    Endpoint Video Streaming dari path custom (user-uploaded atau custom path).
+    - `path`: full path ke file video
+    """
+    # Validasi path untuk keamanan (cegah path traversal)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail=f"File video tidak ditemukan di path: {path}")
+    
+    # Pastikan file adalah video
+    valid_extensions = ['.mp4', '.avi', '.mov', '.mkv', '.flv', '.wmv']
+    if not any(path.lower().endswith(ext) for ext in valid_extensions):
+        raise HTTPException(status_code=400, detail="Format file tidak didukung. Gunakan: mp4, avi, mov, mkv, flv, wmv")
+    
+    return StreamingResponse(
+        generate_video_stream(path),
+        media_type="multipart/x-mixed-replace; boundary=frame"
     )
 
 
